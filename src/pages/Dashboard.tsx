@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Home,
   Shield,
   File,
-  Settings,
+  Gift,
   PanelLeft,
   HelpCircle,
   Bell,
@@ -13,102 +13,135 @@ import {
   ArrowRight,
   ShieldCheck,
   User,
-  ChevronLeft,
-  ChevronUp
+  RefreshCw,
+  ChevronUp,
+  AlertTriangle,
+  Clock
 } from 'lucide-react'
-
-type CardStatus = 'covered' | 'not-covered' | 'loading' | 'error'
+import { DashboardService, type DashboardCard } from '../services/dashboardService'
+import { UOITimeoutError, UOIUnavailableError } from '../api/uoi'
 
 interface PolicyCard {
   id: string
+  productCode: string
   title: string
   icon: React.ReactNode
-  status: CardStatus
-  policies?: Array<{ name: string; badge: string; badgeColor: string; policyNo: string }>
-  notCoveredText?: string
-  errorMessage?: string | null
+  hasCoverage: boolean
+  totalPolicies: number
+  items: Array<{ id: string; title: string; status?: string; raw: Record<string, unknown> }>
+  errorMessage: string | null
+}
+
+function productIcon(code: string) {
+  switch (code) {
+    case 'TR01': return <Shield className="w-[24px] h-[24px] text-[#212121]" />
+    case 'HM01': return <Home className="w-[24px] h-[24px] text-[#212121]" />
+    case 'MO01': return <Car className="w-[24px] h-[24px] text-[#212121]" />
+    case 'DH01': return <User className="w-[24px] h-[24px] text-[#212121]" />
+    default: return <Shield className="w-[24px] h-[24px] text-[#212121]" />
+  }
+}
+
+function statusBadgeColor(status?: string): string {
+  if (!status) return 'bg-gray-100 text-gray-600'
+  const s = status.toLowerCase()
+  if (s === 'active') return 'bg-green-100 text-green-700'
+  if (s === 'expired') return 'bg-red-100 text-red-600'
+  if (s === 'pending') return 'bg-orange-100 text-orange-600'
+  return 'bg-gray-100 text-gray-600'
+}
+
+function mapCard(c: DashboardCard): PolicyCard {
+  return {
+    id: c.productCode,
+    productCode: c.productCode,
+    title: c.productName,
+    icon: productIcon(c.productCode),
+    hasCoverage: c.hasCoverage,
+    totalPolicies: c.totalPolicies,
+    items: c.recentItems,
+    errorMessage: c.errorMessage,
+  }
+}
+
+function notCoveredText(code: string): string {
+  switch (code) {
+    case 'MO01': return 'Protect your car from $X/year with your pre-filled details. Get quote here.'
+    case 'HM01': return 'Protect your home contents from $X/year. Get quote here.'
+    case 'DH01': return 'Cover your domestic helper from $X/year. Get quote here.'
+    default: return 'Get covered from $X/year with your pre-filled details. Get quote here.'
+  }
 }
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [cards, setCards] = useState<PolicyCard[]>([])
+  const [greeting, setGreeting] = useState('Good evening')
+  const [userName, setUserName] = useState('there')
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [error, setError] = useState<{ type: 'timeout' | 'unavailable' | 'unknown'; message: string } | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
-  const fetchDashboard = () => {
-    setLoading(true)
-    // Simulate API call
-    setTimeout(() => {
-      setCards([
-        {
-          id: 'travel',
-          title: 'Travel',
-          icon: <Shield className="w-[24px] h-[24px] text-[#212121]" />,
-          status: 'covered',
-          policies: [
-            { name: 'InsureTravel (Annual Trip)', badge: 'In Force', badgeColor: 'bg-green-100 text-green-700', policyNo: 'PNF320104124A23' },
-            { name: 'UniTravel (Single Trip)', badge: 'Expired', badgeColor: 'bg-red-100 text-red-600', policyNo: 'PNF320104124A23' },
-          ],
-        },
-        {
-          id: 'home',
-          title: 'Home',
-          icon: <Home className="w-[24px] h-[24px] text-[#212121]" />,
-          status: 'covered',
-          policies: [
-            { name: 'UniHome', badge: 'Renewal Due', badgeColor: 'bg-orange-100 text-orange-600', policyNo: 'PNF320104124A23' },
-          ],
-        },
-        {
-          id: 'motor',
-          title: 'Motor',
-          icon: <Car className="w-[24px] h-[24px] text-[#212121]" />,
-          status: 'not-covered',
-          notCoveredText: 'Protect your car from $X/year with your pre-filled details. Get quote here.',
-        },
-        {
-          id: 'helper',
-          title: 'Helper',
-          icon: <User className="w-[24px] h-[24px] text-[#212121]" />,
-          status: 'covered',
-          policies: [
-            { name: 'UniHelper', badge: 'In Force', badgeColor: 'bg-green-100 text-green-700', policyNo: 'PNF320104124A23' },
-          ],
-        },
-        {
-          id: 'hospitalisation',
-          title: 'Hospitalisation Protection',
-          icon: <Shield className="w-[24px] h-[24px] text-[#212121]" />,
-          status: 'not-covered',
-          notCoveredText: 'Cover day-to-day expenses when hospitalised from $X/year. Get quote here.',
-        },
-        {
-          id: 'personal-accident',
-          title: 'Personal Accident',
-          icon: <User className="w-[24px] h-[24px] text-[#212121]" />,
-          status: 'not-covered',
-          notCoveredText: 'Get medical coverage for accidents from $X/year with your pre-filled details. Get quote here.',
-        },
-      ])
-      setLoading(false)
-    }, 1000)
+  const loadDashboard = async (isRefresh = false) => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+
+    if (isRefresh) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
+    setError(null)
+
+    try {
+      const model = isRefresh
+        ? await DashboardService.refreshSummary(ctrl.signal)
+        : await DashboardService.getSummary(ctrl.signal)
+
+      if (ctrl.signal.aborted) return
+
+      setGreeting(model.greeting)
+      setUserName(model.userName)
+      setCards(model.cards.map(mapCard))
+    } catch (e: unknown) {
+      if ((e as Error)?.name === 'AbortError') return
+      if (e instanceof UOITimeoutError) {
+        setError({ type: 'timeout', message: e.message })
+      } else if (e instanceof UOIUnavailableError) {
+        setError({ type: 'unavailable', message: e.message })
+      } else {
+        setError({ type: 'unknown', message: (e as Error)?.message ?? 'An unexpected error occurred.' })
+      }
+    } finally {
+      if (!ctrl.signal.aborted) {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    }
   }
 
   useEffect(() => {
-    fetchDashboard()
+    loadDashboard(false)
+    return () => { abortRef.current?.abort() }
   }, [])
+
+  const handleRefresh = () => loadDashboard(true)
 
   const handleLogout = () => {
     setShowUserMenu(false)
-    navigate('/login')
+    DashboardService.invalidate()
+    navigate('/')
   }
 
   const navItems = [
-    { label: 'Dashboard', icon: <Home className="w-[24px] h-[24px]" />, active: true },
-    { label: 'Policies', icon: <Shield className="w-[24px] h-[24px]" />, active: false },
-    { label: 'Claims', icon: <File className="w-[24px] h-[24px]" />, active: false },
-    { label: 'Rewards', icon: <Settings className="w-[24px] h-[24px]" />, active: false },
+    { label: 'Dashboard', icon: <Home className="w-[24px] h-[24px]" />, active: true, route: '/dashboard' },
+    { label: 'Policies', icon: <Shield className="w-[24px] h-[24px]" />, active: false, route: '/policies' },
+    { label: 'Claims', icon: <File className="w-[24px] h-[24px]" />, active: false, route: '/claims' },
+    { label: 'Rewards', icon: <Gift className="w-[24px] h-[24px]" />, active: false, route: '/rewards' },
   ]
 
   const rewards = [
@@ -129,7 +162,7 @@ export default function Dashboard() {
     {
       img: 'https://s3-alpha-sig.figma.com/img/8287/f018/93dadb02e8922d16e90a39a645f04366?Expires=1777852800&Key-Pair-Id=APKAQ4GOSFWCW27IBOMQ&Signature=FvBJcOyMPYJHiTC4X9l8Vkx13O3GdrJe7wpaabFamd~EcJzIoVR3jvqG2QnO98WXacHJpRnCEAR9wgS5aRkeBPplVEFH9F6t2AS56pHoZxV498Os0MDS0UrLQaG-4rGLR7p2LOOQ4EEXMvv09A6st8XqSQMUGZSuV1J8vH27mPhK6-udbegy~TWKGmOZ7VDiVZgGVt9isDg7u5LTihrUGxbcKtABoSkFE0CaO36TjvHaRRwbgMesxCzovYOA~~utbTHg1RZiBZqTUFxDDUgxybvkMNkYLCoH9~uQGrAS~8fPPx-ljm8iDmFwEdLR-L0rzG-u-lR9g0HBGraZdeAajA__',
       logo: 'https://s3-alpha-sig.figma.com/img/3aa6/8189/82dafd597dffb5e00a3a6d89d162beec?Expires=1777852800&Key-Pair-Id=APKAQ4GOSFWCW27IBOMQ&Signature=TOw1O9cQBy-MGUjIPJVPwkDsmgJIL4PN5crLB9WM5I73zJiYN1UpUItZE1A6iz9GEBi-E6tJjUDsrH4nAjaRlDbhKLQ7lENfpvExbfAW6nlRTMUyJscu5BqxVgmO1bSq1xhwnJqwxKZSWwKspmbPRjudGhOnEL3qq4YTvu9CygBP~P8nUDXRTFj2a0LBGNoig~VmfFFxZzTVpkgAP0SqKBi4cI-fKJQOspOmYGSqozxVqXI66MvEFy4~dbIoCUOV68OvGqYh4yoploGPlWvii7by00kY6JHa3c~PaAWEMihmm2S9InzyDdfq7y0~-zJqdGjbe-qHdeqW-Iq6-kRMEg__',
-      title: '$5 Credit Reward for HEYMAX New User Sign Up ',
+      title: '$5 Credit Reward for HEYMAX New User Sign Up',
       desc: 'Enter promo code UOIHEYMAX5 during registration to enjoy $5 credit.',
       btn: 'Sign Up',
     },
@@ -145,6 +178,8 @@ export default function Dashboard() {
     </div>
   )
 
+  const coveredCount = cards.filter(c => c.hasCoverage).length
+
   return (
     <div className="h-screen w-full flex flex-col overflow-hidden">
       <div className="flex-1 flex flex-row overflow-hidden">
@@ -158,7 +193,11 @@ export default function Dashboard() {
             {/* Logo */}
             <div className="flex items-center gap-[10px]">
               {sidebarOpen && (
-                <img src="https://s3-alpha-sig.figma.com/img/26ec/3ab4/0588c7482da725dcdeb68b2897f9bde2?Expires=1777852800&Key-Pair-Id=APKAQ4GOSFWCW27IBOMQ&Signature=ShoM0pDLFtIglvPWeRLcrNHkP-8DajZ~UfTydATZnIyvxRx0Q8vNaKu-xBitsol0veqqwq1r4p1azXwhatXwj7sKArxvuNthVWmFirx22koohe8997mFNM6GF2P9FJZQ6hnguVRCcCTWizRFgiWWnqabTviIJl1EuaMxA65dwinn4u47OVQuKOW4HPfBJ49i-x-lqHrsAbGLy9XfBAQqpYzMCSsmnWFH-jgrpSRysU3HqoilRLqyQb6LtiIX7mix4qKeTiJI50ywXWQYf5zHXGyqc7Ry5JQaJUdS88v~1e1Kd-i6t7RipipnfhyJG71UbhW-m-9vh~8Pv9t2nKWPxg__" alt="UOI Logo" className="w-[100px] h-[51px] object-contain" />
+                <img
+                  src="https://s3-alpha-sig.figma.com/img/26ec/3ab4/0588c7482da725dcdeb68b2897f9bde2?Expires=1777852800&Key-Pair-Id=APKAQ4GOSFWCW27IBOMQ&Signature=ShoM0pDLFtIglvPWeRLcrNHkP-8DajZ~UfTydATZnIyvxRx0Q8vNaKu-xBitsol0veqqwq1r4p1azXwhatXwj7sKArxvuNthVWmFirx22koohe8997mFNM6GF2P9FJZQ6hnguVRCcCTWizRFgiWWnqabTviIJl1EuaMxA65dwinn4u47OVQuKOW4HPfBJ49i-x-lqHrsAbGLy9XfBAQqpYzMCSsmnWFH-jgrpSRysU3HqoilRLqyQb6LtiIX7mix4qKeTiJI50ywXWQYf5zHXGyqc7Ry5JQaJUdS88v~1e1Kd-i6t7RipipnfhyJG71UbhW-m-9vh~8Pv9t2nKWPxg__"
+                  alt="UOI Logo"
+                  className="w-[100px] h-[51px] object-contain"
+                />
               )}
             </div>
 
@@ -167,6 +206,7 @@ export default function Dashboard() {
               {navItems.map((item) => (
                 <div
                   key={item.label}
+                  onClick={() => navigate(item.route)}
                   className={`flex items-center gap-[12px] px-[12px] py-[10px] rounded-[8px] cursor-pointer ${
                     item.active
                       ? 'bg-gradient-to-r from-[#005eb8]/10 to-[#5c55eb]/10 text-[#005eb8]'
@@ -205,8 +245,15 @@ export default function Dashboard() {
           <header className="w-full flex items-center justify-between px-[24px] py-[12px] bg-[#ffffff] border-b border-[#000000] shrink-0">
             <div className="flex-1" />
             <div className="flex items-center gap-[20px]">
-              <HelpCircle className="w-[24px] h-[24px] text-[#212121] cursor-pointer" />
-              <Bell className="w-[24px] h-[24px] text-[#212121] cursor-pointer" />
+              <button onClick={() => navigate('/help')} className="cursor-pointer hover:opacity-70">
+                <HelpCircle className="w-[24px] h-[24px] text-[#212121]" />
+              </button>
+              <button onClick={() => navigate('/notifications')} className="cursor-pointer hover:opacity-70">
+                <Bell className="w-[24px] h-[24px] text-[#212121]" />
+              </button>
+              <button onClick={() => navigate('/settings')} className="cursor-pointer hover:opacity-70">
+                <PanelLeft className="w-[24px] h-[24px] text-[#212121]" />
+              </button>
               <div className="w-px h-[32px] bg-black/[0.09] rounded-full" />
               <div className="relative">
                 <div
@@ -220,6 +267,12 @@ export default function Dashboard() {
                 </div>
                 {showUserMenu && (
                   <div className="absolute right-0 top-[40px] w-[160px] bg-white rounded-[8px] shadow-[0px_4px_12px_rgba(0,0,0,0.15)] z-50 overflow-hidden">
+                    <button
+                      onClick={() => { setShowUserMenu(false); navigate('/settings') }}
+                      className="w-full text-left px-[16px] py-[12px] text-[14px] text-[#212121] font-[Noto_Sans] hover:bg-gray-50"
+                    >
+                      Settings
+                    </button>
                     <button
                       onClick={handleLogout}
                       className="w-full text-left px-[16px] py-[12px] text-[14px] text-[#212121] font-[Noto_Sans] hover:bg-gray-50"
@@ -238,15 +291,56 @@ export default function Dashboard() {
             style={{ background: 'linear-gradient(to bottom, rgba(0,94,184,0.07) 0%, rgba(92,85,235,0.07) 73%)', backgroundColor: '#ffffff' }}
           >
             <div className="max-w-[980px] mx-auto px-[32px] py-[48px] pb-[100px] flex flex-col gap-[28px]">
+
+              {/* Global error banner */}
+              {error && (
+                <div className="flex items-start gap-[12px] px-[16px] py-[14px] bg-red-50 border border-red-200 rounded-[8px]">
+                  {error.type === 'timeout'
+                    ? <Clock className="w-[20px] h-[20px] text-red-500 shrink-0 mt-[2px]" />
+                    : <AlertTriangle className="w-[20px] h-[20px] text-red-500 shrink-0 mt-[2px]" />
+                  }
+                  <div className="flex flex-col gap-[4px] flex-1">
+                    <span className="text-[14px] font-medium text-red-700 font-[Noto_Sans]">
+                      {error.type === 'timeout' ? 'Request timed out' : 'Service unavailable'}
+                    </span>
+                    <span className="text-[13px] text-red-600 font-[Noto_Sans]">{error.message}</span>
+                  </div>
+                  <button
+                    onClick={handleRefresh}
+                    disabled={refreshing}
+                    className="flex items-center gap-[6px] px-[12px] py-[6px] bg-red-600 text-white rounded-[6px] text-[13px] font-medium font-[Noto_Sans] hover:opacity-90 disabled:opacity-60"
+                  >
+                    <RefreshCw className={`w-[14px] h-[14px] ${refreshing ? 'animate-spin' : ''}`} />
+                    Retry
+                  </button>
+                </div>
+              )}
+
               {/* Greeting */}
-              <div className="flex flex-col gap-[12px]">
-                <h1 className="text-[32px] font-bold leading-[38.4px] text-[#212121] font-[Noto_Sans]">Good evening, Chris 👋</h1>
-                <p className="text-[16px] leading-[24px] text-[#6e6e6e] font-[Noto_Sans]">Here's an overview of your insurance policies and recent activities</p>
+              <div className="flex items-start justify-between">
+                <div className="flex flex-col gap-[12px]">
+                  <h1 className="text-[32px] font-bold leading-[38.4px] text-[#212121] font-[Noto_Sans]">
+                    {greeting}, {userName === 'there' ? 'Chris' : userName} 👋
+                  </h1>
+                  <p className="text-[16px] leading-[24px] text-[#6e6e6e] font-[Noto_Sans]">Here's an overview of your insurance policies and recent activities</p>
+                </div>
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing || loading}
+                  className="flex items-center gap-[6px] px-[12px] py-[8px] bg-white border border-gray-200 rounded-[8px] text-[14px] text-[#212121] font-[Noto_Sans] hover:bg-gray-50 disabled:opacity-50 shrink-0 mt-[4px]"
+                >
+                  <RefreshCw className={`w-[16px] h-[16px] ${refreshing ? 'animate-spin' : ''}`} />
+                  {refreshing ? 'Refreshing...' : 'Refresh'}
+                </button>
               </div>
 
               {/* Banner */}
               <div className="w-full h-[270px] rounded-[8px] overflow-hidden shadow-[0px_1px_4px_0px_rgba(0,0,0,0.05)]">
-                <img src="https://s3-alpha-sig.figma.com/img/b174/518e/b937b0d57f4c2d0945d9af6744ea37cb?Expires=1777852800&Key-Pair-Id=APKAQ4GOSFWCW27IBOMQ&Signature=IgUA6SYvFf2bjGgsXM9J5LdtV64i7P4flXUmwMMHKPU2p-1U2k5xNVoMDLJGb36~0R9fhLA3-R4J8Oa6ZcLqag1QpNk-HKKxxuU-CGLDPXJ2bCTGjAYI75AgmPGXwCbFnru0pQrP17-RGZWVmZztqjrrj0iyzMaGAQi~e3rOYgP~wEvKIk~GREpl6aAlwcSxDSPWAwZ2HudtFnl80kbsFHUXAwYD7eLzdB1NQekU82kBZTpg1MxSE~pEY11CYUeEZ84SO-hyRPP68HVlYDyWBWmAFvksSIFj7q4WsTeptzmtxQeWEv2o2YTErSwcjm4BaJC1BmcmX7hfIVbtkZtFbw__" alt="Marketing Banner" className="w-full h-full object-cover" />
+                <img
+                  src="https://s3-alpha-sig.figma.com/img/b174/518e/b937b0d57f4c2d0945d9af6744ea37cb?Expires=1777852800&Key-Pair-Id=APKAQ4GOSFWCW27IBOMQ&Signature=IgUA6SYvFf2bjGgsXM9J5LdtV64i7P4flXUmwMMHKPU2p-1U2k5xNVoMDLJGb36~0R9fhLA3-R4J8Oa6ZcLqag1QpNk-HKKxxuU-CGLDPXJ2bCTGjAYI75AgmPGXwCbFnru0pQrP17-RGZWVmZztqjrrj0iyzMaGAQi~e3rOYgP~wEvKIk~GREpl6aAlwcSxDSPWAwZ2HudtFnl80kbsFHUXAwYD7eLzdB1NQekU82kBZTpg1MxSE~pEY11CYUeEZ84SO-hyRPP68HVlYDyWBWmAFvksSIFj7q4WsTeptzmtxQeWEv2o2YTErSwcjm4BaJC1BmcmX7hfIVbtkZtFbw__"
+                  alt="Marketing Banner"
+                  className="w-full h-full object-cover"
+                />
               </div>
 
               {/* Quick Actions */}
@@ -254,12 +348,13 @@ export default function Dashboard() {
                 <h2 className="text-[20px] font-bold leading-[24px] text-[#212121] font-[Noto_Sans]">Quick Actions</h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-[20px]">
                   {[
-                    { icon: <ChevronUp className="w-[24px] h-[24px]" />, title: 'Submit Claim', desc: 'Prepare documents for claims' },
-                    { icon: <Shield className="w-[24px] h-[24px]" />, title: 'Buy New Policy', desc: 'Explore a wide range of policies' },
-                    { icon: <HelpCircle className="w-[24px] h-[24px]" />, title: 'Help & Support', desc: 'Learn more about our FAQs' },
+                    { icon: <File className="w-[24px] h-[24px]" />, title: 'Submit Claim', desc: 'Prepare documents for claims', route: '/claims' },
+                    { icon: <Shield className="w-[24px] h-[24px]" />, title: 'Buy New Policy', desc: 'Explore a wide range of policies', route: '/policies' },
+                    { icon: <HelpCircle className="w-[24px] h-[24px]" />, title: 'Help & Support', desc: 'Learn more about our FAQs', route: '/help' },
                   ].map((action) => (
                     <div
                       key={action.title}
+                      onClick={() => navigate(action.route)}
                       className="flex flex-col p-[16px] gap-[24px] bg-[#ffffff] rounded-[8px] shadow-[0px_1px_4px_0px_rgba(0,0,0,0.05)] cursor-pointer hover:shadow-md transition-shadow"
                     >
                       <div className="flex items-start gap-[12px]">
@@ -279,9 +374,14 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-[8px]">
                     <span className="text-[20px] font-bold leading-[24px] text-[#212121] font-[Noto_Sans]">Your Coverage</span>
-                    <span className="text-[20px] leading-[24px] text-[#6e6e6e] font-[Noto_Sans]">(5)</span>
+                    {!loading && (
+                      <span className="text-[20px] leading-[24px] text-[#6e6e6e] font-[Noto_Sans]">({coveredCount})</span>
+                    )}
                   </div>
-                  <button className="flex items-center gap-[4px] cursor-pointer hover:opacity-70">
+                  <button
+                    onClick={() => navigate('/policies')}
+                    className="flex items-center gap-[4px] cursor-pointer hover:opacity-70"
+                  >
                     <span className="text-[14px] text-[#0d6efd] font-[Noto_Sans]">View All</span>
                     <ArrowRight className="w-[16px] h-[16px] text-[#0d6efd]" />
                   </button>
@@ -301,7 +401,7 @@ export default function Dashboard() {
                               {card.icon}
                               <span className="text-[16px] font-medium leading-[24px] text-[#212121] font-[Noto_Sans]">{card.title}</span>
                             </div>
-                            {card.status === 'covered' ? (
+                            {card.hasCoverage ? (
                               <div className="flex items-center gap-[4px] px-[8px] py-[4px] bg-[#005eb8] rounded-[24px]">
                                 <ShieldCheck className="w-[12px] h-[12px] text-white" />
                                 <span className="text-[12px] font-medium text-white font-[Noto_Sans]">COVERED</span>
@@ -315,72 +415,65 @@ export default function Dashboard() {
 
                           {/* Card body */}
                           <div className="flex-1 p-[16px] bg-[#ffffff] rounded-bl-[8px] rounded-br-[8px] flex flex-col gap-[12px]">
-                            {card.status === 'covered' && card.id === 'travel' && (
-                              <>
-                                {/* Repurchase nudge */}
-                                <div
-                                  className="flex items-center justify-between px-[12px] py-[8px] rounded-[8px] border border-gray-200"
-                                  style={{ background: 'linear-gradient(to bottom, rgba(0,94,184,0.07) 0%, rgba(92,85,235,0.07) 73%)' }}
+                            {card.errorMessage && (
+                              <div className="flex items-center gap-[8px] px-[12px] py-[8px] bg-red-50 rounded-[8px]">
+                                <AlertTriangle className="w-[16px] h-[16px] text-red-500 shrink-0" />
+                                <span className="text-[13px] text-red-600 font-[Noto_Sans]">{card.errorMessage}</span>
+                              </div>
+                            )}
+
+                            {card.hasCoverage && card.productCode === 'TR01' && (
+                              <div
+                                className="flex items-center justify-between px-[12px] py-[8px] rounded-[8px] border border-gray-200"
+                                style={{ background: 'linear-gradient(to bottom, rgba(0,94,184,0.07) 0%, rgba(92,85,235,0.07) 73%)' }}
+                              >
+                                <span
+                                  className="text-[14px] font-medium font-[Noto_Sans]"
+                                  style={{ background: 'linear-gradient(to right, #005eb8 1%, #5c55eb 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
                                 >
-                                  <span
-                                    className="text-[14px] font-medium font-[Noto_Sans]"
-                                    style={{ background: 'linear-gradient(to right, #005eb8 1%, #5c55eb 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
-                                  >
-                                    New trip? Get covered in 2 minutes.
-                                  </span>
-                                  <button className="flex items-center justify-center px-[16px] py-[8px] bg-[#005eb8] rounded-[8px] shadow-[0px_1px_4px_0px_rgba(0,0,0,0.05)] cursor-pointer hover:opacity-90">
-                                    <span className="text-[14px] font-medium text-white font-[Noto_Sans] whitespace-nowrap">Buy Now</span>
-                                  </button>
+                                  New trip? Get covered in 2 minutes.
+                                </span>
+                                <button
+                                  onClick={() => navigate('/policies')}
+                                  className="flex items-center justify-center px-[16px] py-[8px] bg-[#005eb8] rounded-[8px] shadow-[0px_1px_4px_0px_rgba(0,0,0,0.05)] cursor-pointer hover:opacity-90"
+                                >
+                                  <span className="text-[14px] font-medium text-white font-[Noto_Sans] whitespace-nowrap">Buy Now</span>
+                                </button>
+                              </div>
+                            )}
+
+                            {card.hasCoverage && card.items.map((item) => {
+                              const policyNo = String(item.raw['policyNo'] ?? item.raw['proposalNo'] ?? item.id)
+                              return (
+                                <div
+                                  key={item.id}
+                                  onClick={() => navigate('/policy/' + policyNo)}
+                                  className="flex items-center justify-between px-[12px] py-[12px] bg-[#f9f9f9] rounded-[12px] cursor-pointer hover:bg-gray-100"
+                                >
+                                  <div className="flex flex-col gap-[4px]">
+                                    <div className="flex items-center gap-[8px]">
+                                      <span className="text-[14px] font-medium text-[#212121] font-[Noto_Sans]">{item.title}</span>
+                                      {item.status && (
+                                        <span className={`text-[12px] px-[6px] py-[2px] rounded-full font-[Noto_Sans] ${statusBadgeColor(item.status)}`}>
+                                          {item.status}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[14px] leading-[21px] text-[#6e6e6e] font-[Noto_Sans]">{policyNo}</span>
+                                  </div>
+                                  <ChevronRight className="w-[16px] h-[16px] text-[#212121]" />
                                 </div>
-                                {card.policies?.map((policy, idx) => (
-                                  <div key={idx} className="flex items-center justify-between px-[12px] py-[12px] bg-[#f9f9f9] rounded-[12px] cursor-pointer hover:bg-gray-100">
-                                    <div className="flex flex-col gap-[4px]">
-                                      <div className="flex items-center gap-[8px]">
-                                        <span className="text-[14px] font-medium text-[#212121] font-[Noto_Sans]">{policy.name}</span>
-                                        <span className={`text-[12px] px-[6px] py-[2px] rounded-full font-[Noto_Sans] ${policy.badgeColor}`}>{policy.badge}</span>
-                                      </div>
-                                      <span className="text-[14px] leading-[21px] text-[#6e6e6e] font-[Noto_Sans]">{policy.policyNo}</span>
-                                    </div>
-                                    <ChevronRight className="w-[16px] h-[16px] text-[#212121]" />
-                                  </div>
-                                ))}
-                              </>
-                            )}
-                            {card.status === 'covered' && card.id !== 'travel' && (
-                              <>
-                                {card.policies?.map((policy, idx) => (
-                                  <div key={idx} className="flex items-center justify-between px-[12px] py-[12px] bg-[#f9f9f9] rounded-[12px] cursor-pointer hover:bg-gray-100">
-                                    <div className="flex flex-col gap-[4px]">
-                                      <div className="flex items-center gap-[8px]">
-                                        <span className="text-[14px] font-medium text-[#212121] font-[Noto_Sans]">{policy.name}</span>
-                                        <span className={`text-[12px] px-[6px] py-[2px] rounded-full font-[Noto_Sans] ${policy.badgeColor}`}>{policy.badge}</span>
-                                      </div>
-                                      <span className="text-[14px] leading-[21px] text-[#6e6e6e] font-[Noto_Sans]">Policy No: {policy.policyNo}</span>
-                                    </div>
-                                    <ChevronRight className="w-[16px] h-[16px] text-[#212121]" />
-                                  </div>
-                                ))}
-                              </>
-                            )}
-                            {card.status === 'not-covered' && (
+                              )
+                            })}
+
+                            {!card.hasCoverage && !card.errorMessage && (
                               <p className="text-[16px] leading-[24px] text-[#212121] font-[Noto_Sans]">
-                                {card.notCoveredText?.split('here').map((part, i, arr) =>
+                                {notCoveredText(card.productCode).split('here').map((part, i, arr) =>
                                   i < arr.length - 1
-                                    ? <span key={i}>{part}<span className="text-[#005eb8] underline cursor-pointer">here</span></span>
+                                    ? <span key={i}>{part}<span className="text-[#005eb8] underline cursor-pointer" onClick={() => navigate('/policies')}>here</span></span>
                                     : <span key={i}>{part}</span>
                                 )}
                               </p>
-                            )}
-                            {card.status === 'error' && (
-                              <div className="flex flex-col gap-[8px]">
-                                <p className="text-[14px] text-[#dc3545] font-[Noto_Sans]">{card.errorMessage}</p>
-                                <button
-                                  onClick={fetchDashboard}
-                                  className="text-[14px] text-[#005eb8] underline cursor-pointer font-[Noto_Sans] text-left"
-                                >
-                                  Retry
-                                </button>
-                              </div>
                             )}
                           </div>
                         </div>
@@ -393,7 +486,10 @@ export default function Dashboard() {
               <div className="flex flex-col gap-[20px]">
                 <div className="flex items-center justify-between">
                   <span className="text-[20px] font-bold leading-[24px] text-[#212121] font-[Noto_Sans]">Rewards</span>
-                  <button className="flex items-center gap-[4px] cursor-pointer hover:opacity-70">
+                  <button
+                    onClick={() => navigate('/rewards')}
+                    className="flex items-center gap-[4px] cursor-pointer hover:opacity-70"
+                  >
                     <span className="text-[14px] text-[#0d6efd] font-[Noto_Sans]">View All</span>
                     <ArrowRight className="w-[16px] h-[16px] text-[#0d6efd]" />
                   </button>
@@ -422,13 +518,19 @@ export default function Dashboard() {
                           <span className="text-[16px] font-medium leading-[24px] text-[#212121] font-[Noto_Sans]">{reward.title}</span>
                           <span className="text-[14px] leading-[21px] text-[#6e6e6e] font-[Noto_Sans]">{reward.desc}</span>
                         </div>
-                        <button className="flex items-center justify-center px-[16px] py-[12px] bg-[#005eb8] rounded-[8px] shadow-[0px_1px_4px_0px_rgba(0,0,0,0.05)] cursor-pointer hover:opacity-90 transition-opacity">
+                        <button
+                          onClick={() => navigate('/rewards')}
+                          className="flex items-center justify-center px-[16px] py-[12px] bg-[#005eb8] rounded-[8px] shadow-[0px_1px_4px_0px_rgba(0,0,0,0.05)] cursor-pointer hover:opacity-90 transition-opacity"
+                        >
                           <span className="text-[16px] font-medium leading-[24px] text-[#ffffff] font-[Noto_Sans]">{reward.btn}</span>
                         </button>
                       </div>
                     </div>
                   ))}
-                  <button className="flex items-center justify-center shrink-0 w-[40px] h-[40px] self-center">
+                  <button
+                    onClick={() => navigate('/rewards')}
+                    className="flex items-center justify-center shrink-0 w-[40px] h-[40px] self-center"
+                  >
                     <ChevronRight className="w-[40px] h-[40px] text-[#212121]" />
                   </button>
                 </div>
